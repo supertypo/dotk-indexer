@@ -1,0 +1,26 @@
+services:
+  dotk_indexer:
+    image: supertypo/dotk-indexer:latest
+    container_name: dotk_indexer
+    restart: unless-stopped
+    ports:
+      - "7799:7799"
+    depends_on:
+      - dotk_db
+    command:
+      - --network=mainnet
+      - --rpc-url=ws://<your node>:17110
+      - --database-url=postgres://postgres:postgres@dotk_db:5432/postgres
+      - --evictor-address=kaspa:<your address>
+
+  dotk_db:
+    image: postgres:18-alpine
+    container_name: dotk_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - dotk_db:/var/lib/postgresql
+
+volumes:
+  dotk_db:

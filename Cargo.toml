@@ -1,0 +1,81 @@
+[package]
+name = "dotk-indexer"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.98.0"
+license = "AGPL-3.0-only"
+description = "The dotk.name indexer: a live, self-proving index of the .k name registry on Kaspa"
+repository = "https://github.com/supertypo/dotk-indexer"
+publish = false
+default-run = "dotk-indexer"
+
+[workspace]
+
+[[bin]]
+name = "dotk-indexer"
+path = "src/main.rs"
+
+[[bin]]
+name = "dotk-openapi"
+path = "src/bin/openapi.rs"
+
+[build-dependencies]
+vergen-git2 = "10"
+
+[dependencies]
+dotk-core = { git = "https://github.com/supertypo/dotk-core", tag = "v0.13.0", features = ["node"] }
+# The revision that dotk-core and silverscript pin, so covenant semantics agree.
+kaspa-addresses = { git = "https://github.com/kaspanet/rusty-kaspa", rev = "a41a333b08848f41bf737b72592e463a6011b8ac" }
+kaspa-consensus-core = { git = "https://github.com/kaspanet/rusty-kaspa", rev = "a41a333b08848f41bf737b72592e463a6011b8ac" }
+kaspa-txscript = { git = "https://github.com/kaspanet/rusty-kaspa", rev = "a41a333b08848f41bf737b72592e463a6011b8ac" }
+kaspa-rpc-core = { git = "https://github.com/kaspanet/rusty-kaspa", rev = "a41a333b08848f41bf737b72592e463a6011b8ac" }
+kaspa-wrpc-client = { git = "https://github.com/kaspanet/rusty-kaspa", rev = "a41a333b08848f41bf737b72592e463a6011b8ac" }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+faster-hex = "1"
+clap = { version = "4", features = ["derive", "env"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "signal", "sync"] }
+async-trait = "0.1"
+deadpool = { version = "0.13", features = ["managed"] }
+humantime = "2"
+log = "0.4"
+env_logger = "0.11"
+sqlx = { version = "0.9", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls-ring", "migrate", "macros", "derive"] }
+axum = "0.8"
+tower-http = { version = "0.7", default-features = false, features = ["cors", "set-header"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["server", "server-graceful", "service", "tokio"] }
+utoipa = { version = "6", features = ["repr"] }
+
+[dev-dependencies]
+dotk-core = { git = "https://github.com/supertypo/dotk-core", tag = "v0.13.0", features = ["node", "test-fixture"] }
+futures = "0.3"
+tokio = { version = "1", features = ["test-util"] }
+tower = { version = "0.5", features = ["util"] }
+testcontainers-modules = { version = "0.15", features = ["postgres", "blocking"] }
+dtor = "1"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+allow_attributes_without_reason = "warn"
+
+[lints.rust]
+redundant_imports = "warn"
+unreachable_pub = "warn"
+unsafe_code = "forbid"
+unused_qualifications = "warn"

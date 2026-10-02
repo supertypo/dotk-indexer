@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="dotk">
+  <defs>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#89f1dd" />
+      <stop offset="1" stop-color="#26b998" />
+    </linearGradient>
+  </defs>
+  <circle cx="64" cy="64" r="64" fill="#071c19" />
+  <circle cx="64" cy="64" r="56" fill="none" stroke="url(#ring)" stroke-width="9" stroke-linecap="round" stroke-dasharray="95.3 22" transform="rotate(-100 64 64)" />
+  <g transform="translate(64 64) scale(0.784) translate(-64 -64) translate(18.27 -0.09)">
+    <circle cx="12" cy="84" r="12" fill="#a5f7e6" />
+    <path fill="#49eacb" transform="translate(41.05 96) scale(1.15) translate(-41.05 -96)" d="M41.05 32.18H55.74V66.92L72.64 50.06H89.70L67.26 71.14L91.46 96.00H73.66L55.74 76.85V96.00H41.05Z" />
+  </g>
+</svg>

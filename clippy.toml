@@ -1,0 +1,2 @@
+too-many-lines-threshold = 40
+doc-valid-idents = ["..", "OpenAPI", "SIGHASH_ALL"]

@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>indexer | dotk.name</title>
+<link rel="icon" href="__LOGO__" type="image/svg+xml">
+<style>
+/* Dark only, because the logo carries a dark disc. */
+:root {
+  color-scheme: dark;
+  --bg:#111114; --surface:#1a1a20; --surface-variant:#24242b; --surface-light:#2f2f38;
+  --ink:#e8e8ed; --muted:#a6a6b0; --outline:#35353f;
+  --link:#75e0cf; --ok:#6fbf95; --bad:#e06c68;
+  --radius:12px;
+  --font-ui:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+* { box-sizing:border-box }
+/* The row rule sets display, which beats the browser's own [hidden] rule. */
+[hidden] { display:none !important }
+html { font-size:clamp(0.9375rem, 0.9rem + 0.25vw, 1rem) }
+body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-ui);
+       display:flex; justify-content:center; padding:32px 16px; }
+main { width:100%; max-width:760px }
+header { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:20px }
+h1 { font-size:1.25rem; margin:0 2px 0 0; letter-spacing:-0.01em; font-weight:600 }
+h1 .dim { color:var(--muted); font-weight:400 }
+.logo { width:28px; height:28px }
+.pill { font-size:0.75rem; padding:3px 10px; border:1px solid var(--outline); border-radius:999px;
+        color:var(--muted); background:var(--surface-variant) }
+.pill.ok { color:var(--ok); border-color:currentColor }
+.pill.bad { color:var(--bad); border-color:currentColor }
+.pill:empty { display:none }
+.card { background:linear-gradient(180deg, color-mix(in srgb, var(--surface-light) 45%, transparent), transparent 55%), var(--surface);
+        border:1px solid var(--outline); border-radius:var(--radius);
+        padding:18px 22px 20px; margin-bottom:16px }
+.card h2 { font-size:0.8125rem; font-weight:600; color:var(--muted); margin:0 0 16px }
+/* `auto-fit`, not `auto-fill`, so three tiles span the card instead of leaving an empty column. */
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:16px }
+.stat .k { font-size:0.75rem; color:var(--muted); margin-bottom:4px }
+.stat .v { font-size:1.25rem; font-weight:600; font-variant-numeric:tabular-nums }
+.stat .v.bad { color:var(--bad) }
+.stat .s { font-size:0.75rem; color:var(--muted); margin-top:2px; font-variant-numeric:tabular-nums }
+.row { display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 16px; padding:12px 0 }
+.grid + .row { margin-top:6px; border-top:1px solid var(--outline) }
+.row + .row { border-top:1px solid var(--outline) }
+.row:last-child { padding-bottom:0 }
+.row .k { flex:0 0 150px; font-size:0.8125rem; color:var(--muted) }
+.row .val { flex:1 1 240px; min-width:0 }
+.line { display:flex; align-items:center; gap:6px; min-width:0 }
+/* An identifier elides its tail, because readers tell two apart by how they begin. The full
+   value is in the title attribute, which the copy button copies. */
+.elide { flex:0 1 auto; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+         font-family:var(--font-mono); font-size:0.8125rem }
+.copy { flex:0 0 auto; width:24px; height:24px; display:grid; place-items:center; padding:0;
+        border:0; border-radius:6px; background:none; color:var(--muted); cursor:pointer }
+.copy:hover { color:var(--link); background:var(--surface-variant) }
+.copy svg { width:15px; height:15px; fill:currentColor }
+.meta { display:flex; flex-wrap:wrap; gap:2px 16px; margin-top:6px }
+.meta i { font-style:normal; color:var(--muted); margin-right:5px }
+.meta span { font-family:var(--font-mono); font-size:0.75rem; color:var(--muted);
+             font-variant-numeric:tabular-nums }
+.links { display:flex; flex-wrap:wrap; gap:10px; padding:0 2px }
+.links a { display:flex; align-items:baseline; gap:8px; text-decoration:none;
+           border:1px solid var(--outline); border-radius:999px; padding:6px 14px;
+           background:var(--surface); color:var(--link); font-size:0.8125rem }
+.links a:hover { border-color:var(--link) }
+.links a code { font-family:var(--font-mono); font-size:0.6875rem; color:var(--muted) }
+#selftest-detail { font-family:var(--font-mono); font-size:0.75rem; color:var(--muted);
+                   white-space:pre-wrap; word-break:break-all; margin:0 }
+.credit { margin-top:20px; text-align:center; font-size:0.75rem; color:var(--muted) }
+.credit a { color:var(--muted); text-decoration:underline }
+</style>
+</head>
+<body>
+<main data-base="__BASE__">
+  <header>
+    <img class="logo" src="__LOGO__" alt="">
+    <h1>dotk.name <span class="dim">indexer</span></h1>
+    <span id="network-pill" class="pill"></span>
+    <span id="status-pill" class="pill" role="status">connecting…</span>
+  </header>
+
+  <section class="card">
+    <h2>registry</h2>
+    <div class="grid">
+      <div class="stat"><div class="k">live names</div><div class="v" id="names">–</div></div>
+      <div class="stat"><div class="k">pending</div><div class="v" id="pending">–</div></div>
+      <div class="stat"><div class="k">owner unknown</div><div class="v" id="owner-unknown">–</div></div>
+      <div class="stat"><div class="k">history seq</div><div class="v" id="historySeq">–</div></div>
+    </div>
+    <div class="row">
+      <div class="k">covenant id</div>
+      <div class="val"><div class="line">
+        <span class="elide" id="covenant-id">–</span>
+        <button class="copy" data-copies="covenant-id" type="button" title="copy" aria-label="copy covenant id"></button>
+      </div></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>chain</h2>
+    <div class="grid">
+      <div class="stat"><div class="k">behind</div><div class="v" id="behind">–</div></div>
+      <div class="stat"><div class="k">tip distance</div><div class="v" id="tip">–</div></div>
+      <div class="stat"><div class="k">journal coverage from</div><div class="v" id="journal">–</div></div>
+    </div>
+    <div class="row">
+      <div class="k">last block</div>
+      <div class="val">
+        <div class="line">
+          <span class="elide" id="hash">–</span>
+          <button class="copy" data-copies="hash" type="button" title="copy" aria-label="copy block hash"></button>
+        </div>
+        <div class="meta" id="block-meta"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>proof</h2>
+    <div class="grid">
+      <div class="stat"><div class="k">self-test</div><div class="v" id="selftest">–</div></div>
+      <div class="stat"><div class="k">last proof</div><div class="v" id="proof">–</div>
+                        <div class="s" id="proof-took"></div></div>
+      <div class="stat"><div class="k">gaps / deeds</div><div class="v" id="checked">–</div></div>
+    </div>
+    <div class="row" id="selftest-row" hidden>
+      <div class="k">detail</div>
+      <div class="val"><pre id="selftest-detail"></pre></div>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="__BASE__">docs <code>__BASE__</code></a>
+    <a href="__BASE__/genesis">deployment <code>__BASE__/genesis</code></a>
+    <a href="__BASE__/snapshot">snapshot <code>__BASE__/snapshot</code></a>
+  </nav>
+  <footer class="credit">powered by <a href="https://github.com/supertypo/dotk-indexer">dotk-indexer</a></footer>
+</main>
+<script src="__SCRIPT__"></script>
+</body>
+</html>

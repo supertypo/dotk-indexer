@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__HEADING__ | dotk - __DOMAIN__</title>
+<link rel="icon" href="__LOGO__" type="image/svg+xml">
+<style>
+:root {
+  color-scheme: dark;
+  --bg:#111114; --surface:#1a1a20; --surface-light:#2f2f38;
+  --ink:#e8e8ed; --muted:#a6a6b0; --outline:#35353f; --link:#75e0cf;
+  --radius:12px;
+  --font-ui:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+}
+* { box-sizing:border-box }
+html { font-size:clamp(0.9375rem, 0.9rem + 0.25vw, 1rem) }
+body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-ui);
+       display:flex; justify-content:center; padding:32px 16px; }
+main { width:100%; max-width:560px }
+header { display:flex; align-items:center; gap:10px; margin-bottom:20px }
+h1 { font-size:1.25rem; margin:0; letter-spacing:-0.01em; font-weight:600 }
+h1 .dim { color:var(--muted); font-weight:400 }
+.logo { width:28px; height:28px }
+.card { background:linear-gradient(180deg, color-mix(in srgb, var(--surface-light) 45%, transparent), transparent 55%), var(--surface);
+        border:1px solid var(--outline); border-radius:var(--radius); padding:18px 22px 20px }
+.card h2 { font-size:1rem; font-weight:600; margin:0 0 10px }
+.card p { margin:0 0 14px; color:var(--muted); line-height:1.5 }
+a { color:var(--link); text-decoration:none }
+a:hover { text-decoration:underline }
+.credit { margin-top:20px; text-align:center; font-size:0.75rem; color:var(--muted) }
+.credit a { color:var(--muted); text-decoration:underline }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img class="logo" src="__LOGO__" alt="">
+    <h1>dotk <span class="dim">__DOMAIN__</span></h1>
+  </header>
+  <section class="card">
+    <h2>__HEADING__</h2>
+    <p>__TEXT__</p>
+    <a href="__HREF__">__LINK__</a>
+  </section>
+  <footer class="credit">powered by <a href="https://github.com/supertypo/dotk-indexer">dotk-indexer</a></footer>
+</main>
+</body>
+</html>
