@@ -1,6 +1,9 @@
 name: Release Binaries
 
 on:
+  push:
+    branches:
+      - main
   release:
     types:
       - published
@@ -31,13 +34,21 @@ jobs:
       - name: Install the toolchain
         run: rustup toolchain install
 
+      # A release can only read caches saved on main, so the pushes to main keep this one warm.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.arch }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
       - name: Build
         run: cargo build --release --locked --bin dotk-indexer
 
       - name: Compress
+        if: github.event_name == 'release'
         run: gzip -c target/release/dotk-indexer > dotk-indexer-${{ matrix.arch }}.gz
 
       - name: Upload release asset
+        if: github.event_name == 'release'
         uses: softprops/action-gh-release@v3
         with:
           files: dotk-indexer-${{ matrix.arch }}.gz
