@@ -38,6 +38,11 @@ collects the bounty. Pass it as the `DOTK_EVICTOR_KEY` environment variable (64 
 because a `--evictor-key` argument is readable by every local user in the process list. Without
 either flag the evictor is off.
 
+## Run a release binary
+
+Each [release](https://github.com/supertypo/dotk-indexer/releases) carries gzipped Linux binaries
+for amd64 and arm64, which need glibc 2.35 or newer.
+
 ## Build and run from source
 
 It needs [rustup](https://rustup.rs), which installs the Rust version that `rust-toolchain.toml`

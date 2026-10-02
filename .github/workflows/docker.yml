@@ -86,6 +86,8 @@ jobs:
 
   merge:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     needs:
       - build
     steps:
@@ -143,3 +145,13 @@ jobs:
       - name: Inspect image - release
         if: github.event_name == 'release' && github.event.release.prerelease == false
         run: docker buildx imagetools inspect ${{ vars.DOCKER_REPO }}:${{ steps.meta_release.outputs.version }}
+
+      - name: Write image reference
+        if: github.event_name == 'release'
+        run: echo "${{ vars.DOCKER_REPO }}:${{ steps.meta_release.outputs.version || steps.meta.outputs.version }}" > docker-image.txt
+
+      - name: Upload image reference
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v3
+        with:
+          files: docker-image.txt

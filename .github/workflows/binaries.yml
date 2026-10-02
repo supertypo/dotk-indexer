@@ -1,0 +1,43 @@
+name: Release Binaries
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            arch: amd64
+          - os: ubuntu-22.04-arm
+            arch: arm64
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install the toolchain
+        run: rustup toolchain install
+
+      - name: Build
+        run: cargo build --release --locked --bin dotk-indexer
+
+      - name: Compress
+        run: gzip -c target/release/dotk-indexer > dotk-indexer-${{ matrix.arch }}.gz
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dotk-indexer-${{ matrix.arch }}.gz
