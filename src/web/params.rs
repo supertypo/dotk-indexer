@@ -58,6 +58,12 @@ pub(super) fn path_owner_type(raw: &str) -> Option<OwnerType> {
     (raw == byte.to_string()).then(|| OwnerType::from_byte(byte)).flatten()
 }
 
+/// Plain decimal only, so that a position has no second numeric spelling.
+pub(super) fn seq_cursor(raw: &str) -> Option<i64> {
+    let canonical = !raw.is_empty() && raw.bytes().all(|b| b.is_ascii_digit()) && (raw == "0" || !raw.starts_with('0'));
+    raw.parse().ok().filter(|_| canonical)
+}
+
 pub(super) fn card_cursor(raw: &str) -> Option<([u8; 32], u32)> {
     let (txid, idx) = raw.split_once(':')?;
     let canonical = !idx.is_empty() && idx.bytes().all(|b| b.is_ascii_digit()) && (idx == "0" || !idx.starts_with('0'));

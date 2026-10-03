@@ -22,6 +22,9 @@ indexer is and how to run it.
 - The indexer derives everything that it serves from the chain, and a reader can prove every fact
   against a node. When it cannot prove a fact, it withholds it. It never serves a guess.
 - The self-test and its repair never run while the indexer is behind the chain.
+- A node answer that lacks a field that the request guarantees, or that is malformed, stops the
+  work that asked for it, which retries. The indexer never fills in a default, skips the transaction or records a
+  placeholder, because a stall writes nothing wrong.
 - One indexer runs against a database. Nothing in the code guards against a second one.
 - The schema is the sequence of files in `migrations/`, applied at every start. A schema change is
   a new numbered file. Never edit an applied migration, because sqlx refuses a changed checksum at

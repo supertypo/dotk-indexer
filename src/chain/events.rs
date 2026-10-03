@@ -168,7 +168,8 @@ async fn discover_bounds(
         let seq = event_seq(*out)?;
         db::append_event(conn, &bare_event(block, seq, bound, Vec::new())).await?;
         // Without this, the key's history opens on a transfer of a name nobody saw registered.
-        db::append_history(conn, &history_row(block, tx, seq, bound, HistoryOp::Discover, Some(discovered), CardChange::None)).await?;
+        let row = history_row(block, tx, seq, bound, HistoryOp::Discover, Some(discovered), CardChange::None);
+        db::append_history(conn, &row).await?;
         out.events += 1;
     }
     Ok(())
@@ -291,7 +292,12 @@ async fn journal_event(
     // After the journal entry, because undo deletes history only where a journal row exists.
     append_sweep_history(conn, block, tx, seq, &journal.swept_live, Some(key)).await?;
     // History stores the post-image, so reading it never depends on state the audit can correct.
-    let row = history_row(block, tx, seq, key, change.history_op, change.new.clone(), journal.card);
+    // Only the transaction's own operation keeps its payload, so the indexer stores each payload
+    // once.
+    let row = HistoryRow {
+        payload: Some(tx.payload.clone()),
+        ..history_row(block, tx, seq, key, change.history_op, change.new.clone(), journal.card)
+    };
     db::append_history(conn, &row).await
 }
 
@@ -432,6 +438,7 @@ fn history_row(
         block_hash: block.hash,
         txid: tx.txid,
         state,
+        payload: None,
     }
 }
 

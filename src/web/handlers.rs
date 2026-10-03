@@ -10,13 +10,14 @@ use axum::response::{IntoResponse, Response};
 use dotk_core::state::OwnerType;
 
 use super::dto::{
-    BlockRef, CardOut, DayCount, DeedOut, GapOut, GapsByWidth, HealthQuery, HealthResponse, HistoryEntry, HistoryQuery,
-    HistoryResponse, KeyKindOut, KeyResponse, KeysByPrefix, KeyspaceResponse, KeyspaceTotals, Manifest, NameResponse, NeighborGaps,
-    NoQuery, OwnerResponse, SelfTestDetail, SelfTestSummary, SnapshotQuery, SpenderCardsQuery, SpenderCardsResponse,
+    BlockRef, CardOut, DayCount, DeedOut, GapOut, GapsByWidth, HealthQuery, HealthResponse, HistoryEntry, HistoryFeedQuery,
+    HistoryFeedResponse, HistoryQuery, HistoryResponse, KeyKindOut, KeyResponse, KeysByPrefix, KeyspaceResponse, KeyspaceTotals,
+    Manifest, NameResponse, NeighborGaps, NoQuery, OwnerResponse, SelfTestDetail, SelfTestSummary, SnapshotQuery, SpenderCardsQuery,
+    SpenderCardsResponse,
 };
 use super::error::{ApiError, ErrorCode, ErrorResponse, Internal, NotReady, err, internal};
 use super::middleware::{CachePolicy, cached, live_cache_policy, tagged_json};
-use super::params::{card_cursor, checked, page_limit, path, path_key, path_owner_type, ready, valid_name};
+use super::params::{card_cursor, checked, page_limit, path, path_key, path_owner_type, ready, seq_cursor, valid_name};
 use super::server::{DEPLOYMENT_TAG, HEALTH_TAG, REGISTRY_TAG, SNAPSHOT_TAG};
 use crate::app::{App, Backends, SnapshotBodies, Tagged};
 use crate::audit::{NameLookup, look_up_name};
@@ -359,7 +360,58 @@ pub(super) async fn get_key_history(
         limit,
         offset,
         complete: oldest == Some(crate::model::HistoryOp::Register),
-        entries: rows.iter().map(HistoryEntry::new).collect(),
+        entries: rows.iter().map(|r| HistoryEntry::new(r, false)).collect(),
+        registry_covenant_id: app.deployment.genesis.registry_covenant_id.clone(),
+    })
+    .into_response())
+}
+
+const HISTORY_FEED_LIMIT: u32 = 100;
+/// The one spelling of `limit` that `/history` accepts.
+const HISTORY_FEED_LIMIT_TEXT: &str = "100";
+/// A page ends before the payload that takes it past this many bytes. Only transaction mass bounds
+/// a payload's size.
+const HISTORY_FEED_PAYLOAD_BUDGET: usize = 1 << 20;
+
+#[utoipa::path(
+    method(get),
+    path = "/history",
+    tag = REGISTRY_TAG,
+    summary = "Follow this indexer's history",
+    params(
+        ("after" = Option<i64>, Query, minimum = 0, description = "The last `historySeq` that the reader holds, in plain decimal. Leave it out, or pass 0, for the first page."),
+        ("limit" = Option<u32>, Query, minimum = 100, maximum = 100, description = "Entries per page. It accepts only 100, which is the default.")
+    ),
+    responses(
+        (status = StatusCode::OK, description = "Success. A page of history across every key, in apply order, with `next` while more follow. Past the newest entry, the page is empty", body = HistoryFeedResponse),
+        (status = StatusCode::BAD_REQUEST, description = "An `after` or `limit` that this operation refuses", body = ErrorResponse),
+        NotReady,
+        Internal
+    )
+)]
+pub(super) async fn get_history(
+    State(app): State<Arc<App>>,
+    query: Result<Query<HistoryFeedQuery>, QueryRejection>,
+) -> Result<Response, ApiError> {
+    let query = checked(query)?;
+    if query.limit.as_deref().is_some_and(|l| l != HISTORY_FEED_LIMIT_TEXT) {
+        return Err(err(ErrorCode::InvalidQuery, format!("limit must be {HISTORY_FEED_LIMIT}")));
+    }
+    let after = match query.after.as_deref() {
+        Some(raw) => seq_cursor(raw).ok_or_else(|| {
+            err(ErrorCode::InvalidQuery, "after is a historySeq: a decimal integer without padding, at most 9223372036854775807")
+        })?,
+        None => 0,
+    };
+    ready(&app.verdict).await?;
+    let mut conn = acquire(&app.backends, "the history feed").await?;
+    let page = db::history_feed(&mut conn, after, HISTORY_FEED_LIMIT as usize, HISTORY_FEED_PAYLOAD_BUDGET)
+        .await
+        .map_err(|e| internal("reading a page of history", e))?;
+    Ok(axum::Json(HistoryFeedResponse {
+        history_epoch: page.epoch,
+        entries: page.rows.iter().map(|r| HistoryEntry::new(r, true)).collect(),
+        next: page.next,
         registry_covenant_id: app.deployment.genesis.registry_covenant_id.clone(),
     })
     .into_response())

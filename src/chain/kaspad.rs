@@ -107,12 +107,17 @@ where
     bounded(Arc::clone(&conn), deadline, what, call).await.inspect_err(|_| disconnect(Object::take(conn)))
 }
 
-fn utxo_hits(entries: Vec<kaspa_rpc_core::RpcUtxosByAddressesEntry>) -> Vec<UtxoHit> {
+/// The node answers by the addresses that it was asked about, so an entry without an address is
+/// malformed.
+fn utxo_hits(entries: Vec<kaspa_rpc_core::RpcUtxosByAddressesEntry>) -> Result<Vec<UtxoHit>> {
     entries
         .into_iter()
-        .filter_map(|e| {
-            Some(UtxoHit {
-                address: e.address.as_ref().map(ToString::to_string)?,
+        .map(|e| {
+            let Some(address) = e.address.as_ref() else {
+                anyhow::bail!("UTXO entry {} has no address", e.outpoint.transaction_id);
+            };
+            Ok(UtxoHit {
+                address: address.to_string(),
                 txid: e.outpoint.transaction_id.as_bytes(),
                 index: e.outpoint.index,
                 amount: e.utxo_entry.amount,
@@ -158,12 +163,22 @@ fn accepted_tx(tx: &kaspa_rpc_core::RpcOptionalTransaction) -> Result<AcceptedTx
         };
         outputs.push((value, spk.script().to_vec()));
     }
+    let Some(payload) = tx.payload.clone() else {
+        anyhow::bail!("accepted transaction {txid} has no payload at High verbosity");
+    };
+    let mut sig_scripts = Vec::with_capacity(tx.inputs.len());
+    for input in &tx.inputs {
+        let Some(sig_script) = input.signature_script.clone() else {
+            anyhow::bail!("accepted transaction {txid} has an input without a signature script at High verbosity");
+        };
+        sig_scripts.push(sig_script);
+    }
     Ok(AcceptedTx {
         txid: txid.as_bytes(),
-        sig_scripts: tx.inputs.iter().map(|i| i.signature_script.clone().unwrap_or_default()).collect(),
+        sig_scripts,
         spent,
         outputs,
-        payload: tx.payload.clone().unwrap_or_default(),
+        payload,
         lineage: tx.outputs.first().and_then(|o| o.covenant.as_ref()).and_then(|c| c.0.as_ref()).map(|b| b.0.covenant_id.to_string()),
     })
 }
@@ -200,7 +215,8 @@ impl Kaspad for PooledKaspad {
     async fn virtual_chain(&self, start: [u8; 32], min_confirmations: u64, deadline: Duration) -> Result<VccResponse> {
         // High verbosity carries the payload, where a card is published, and each input's
         // previous outpoint, which names the card a sweep spends.
-        let res = pooled(self.client().await?, deadline, "getVirtualChainFromBlockV2", |client| async move {
+        let conn = self.client().await?;
+        let res = bounded(Arc::clone(&conn), deadline, "getVirtualChainFromBlockV2", |client| async move {
             client
                 .get_virtual_chain_from_block_v2(
                     kaspa_rpc_core::RpcHash::from_bytes(start),
@@ -209,25 +225,37 @@ impl Kaspad for PooledKaspad {
                 )
                 .await
         })
-        .await
-        .map_err(unresumable)?;
-        anyhow::ensure!(
-            res.added_chain_block_hashes.len() == res.chain_block_accepted_transactions.len(),
-            "v2 response misaligned: {} added hashes, {} acceptance entries",
-            res.added_chain_block_hashes.len(),
-            res.chain_block_accepted_transactions.len()
-        );
-        let added = res.chain_block_accepted_transactions.iter().map(chain_block).collect::<Result<_>>()?;
-        Ok(VccResponse { removed: res.removed_chain_block_hashes.iter().map(|h| h.as_bytes()).collect(), added })
+        .await;
+        // A malformed answer drops its connection like a failed call, so the retry can reach
+        // another node.
+        let converted = res.map_err(unresumable).and_then(|res| {
+            anyhow::ensure!(
+                res.added_chain_block_hashes.len() == res.chain_block_accepted_transactions.len(),
+                "v2 response misaligned: {} added hashes, {} acceptance entries",
+                res.added_chain_block_hashes.len(),
+                res.chain_block_accepted_transactions.len()
+            );
+            let added = res.chain_block_accepted_transactions.iter().map(chain_block).collect::<Result<_>>()?;
+            Ok(VccResponse { removed: res.removed_chain_block_hashes.iter().map(|h| h.as_bytes()).collect(), added })
+        });
+        if converted.is_err() {
+            disconnect(Object::take(conn));
+        }
+        converted
     }
 
     async fn utxos_by_addresses(&self, addrs: &[Address]) -> Result<Vec<UtxoHit>> {
         let addrs = addrs.to_vec();
-        let entries = pooled(self.client().await?, PROBE_DEADLINE, "getUtxosByAddresses", |client| async move {
+        let conn = self.client().await?;
+        let hits = bounded(Arc::clone(&conn), PROBE_DEADLINE, "getUtxosByAddresses", |client| async move {
             client.get_utxos_by_addresses(addrs).await
         })
-        .await?;
-        Ok(utxo_hits(entries))
+        .await
+        .and_then(utxo_hits);
+        if hits.is_err() {
+            disconnect(Object::take(conn));
+        }
+        hits
     }
 
     async fn dag_info(&self) -> Result<DagInfo> {
@@ -295,7 +323,7 @@ impl Node for Pinned {
         let addrs = addrs.to_vec();
         let hits =
             self.call(PROBE_DEADLINE, "getUtxosByAddresses", |client| async move { client.get_utxos_by_addresses(addrs).await });
-        Ok(utxo_hits(hits.await?))
+        utxo_hits(hits.await?)
     }
 
     async fn sink_blue_score(&self) -> Result<u64> {

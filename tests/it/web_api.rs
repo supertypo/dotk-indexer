@@ -114,7 +114,7 @@ fn owner_a_address() -> String {
 }
 
 #[tokio::test]
-async fn health_and_snapshot_answer_503_before_the_first_verdict() {
+async fn health_snapshot_and_history_answer_503_before_the_first_verdict() {
     let (h, _w) = standard_boot("web_unjudged", fast_args()).await;
     let web = Web::new(&h);
     // The harness runs the startup pass at boot, so this puts back the state before any self-test.
@@ -127,6 +127,9 @@ async fn health_and_snapshot_answer_503_before_the_first_verdict() {
     let (status, cache, _) = web.get("/v1/snapshot").await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "unproven /snapshot must 503");
     assert_eq!(cache, "no-store");
+    let (status, _, v) = web.get_json("/v1/history").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{v}");
+    assert_eq!(v["code"], "not_ready");
     h.stop().await;
 }
 
@@ -671,5 +674,270 @@ async fn the_status_page_and_its_assets_serve_under_the_base_path() {
     let json = web.send(Request::builder().uri("/api/v1/genesis").body(Body::empty()).unwrap()).await;
     assert_eq!(json.headers()["content-security-policy"], "default-src 'none'; frame-ancestors 'none'");
     assert_eq!(json.headers()["x-content-type-options"], "nosniff");
+    h.stop().await;
+}
+
+async fn follow_history(web: &Web, after: i64) -> Vec<serde_json::Value> {
+    let mut entries = Vec::new();
+    let mut after = after;
+    loop {
+        let (status, _, v) = web.get_json(&format!("/v1/history?after={after}")).await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        let page = v["entries"].as_array().unwrap();
+        assert!(page.len() <= 100, "a page holds at most 100 entries: {v}");
+        entries.extend(page.iter().cloned());
+        match v["next"].as_i64() {
+            Some(next) => {
+                assert!(!page.is_empty() && next > after, "a page with next moves forward: {v}");
+                assert_eq!(Some(next), page.last().and_then(|e| e["historySeq"].as_i64()), "next is the last entry's historySeq");
+                after = next;
+            }
+            None => return entries,
+        }
+    }
+}
+
+fn hex_key(name: &str) -> String {
+    dotk_indexer::convert::hex32(&dotk_core::key_of(name))
+}
+
+#[tokio::test]
+async fn the_history_feed_follows_every_key_in_apply_order_with_each_payload() {
+    let (h, mut w, web, _) = web_boot("web_history_feed").await;
+    let (s, a) = w.register("bob", &OWNER_A);
+    let bob_txids = [s.txid, a.txid];
+    h.sim.add_block(vec![s, a]);
+    let card = w.transfer_with_card("alice", &OWNER_A, &records_named("alice"), &OWNER_A);
+    let (card_txid, card_payload) = (card.txid, faster_hex::hex_string(&card.payload));
+    h.sim.add_block(vec![card]);
+    let sweep = w.sweep_cards(&OWNER_A);
+    h.sim.add_block(vec![sweep]);
+    h.wait_until("alice's sweep", || async { h.history(&dotk_core::key_of("alice")).await.len() == 4 }).await;
+
+    let all = follow_history(&web, 0).await;
+    let keys: Vec<&str> = all.iter().map(|e| e["key"].as_str().unwrap()).collect();
+    let (alice, bob) = (hex_key("alice"), hex_key("bob"));
+    assert_eq!(keys, [&alice, &alice, &bob, &bob, &alice, &alice], "every key, in apply order");
+    assert_eq!(all[2]["txid"], dotk_indexer::convert::hex32(&bob_txids[0]).as_str(), "a register before its activate");
+    assert_eq!(all[3]["txid"], dotk_indexer::convert::hex32(&bob_txids[1]).as_str());
+    let seqs: Vec<i64> = all.iter().map(|e| e["historySeq"].as_i64().unwrap()).collect();
+    assert!(seqs.windows(2).all(|w| w[0] < w[1]), "historySeq only grows along the feed: {seqs:?}");
+    assert_eq!(all[4]["txid"], dotk_indexer::convert::hex32(&card_txid).as_str());
+    assert_eq!(all[4]["payload"], card_payload.as_str(), "the transfer's payload is its card");
+    assert_eq!(all[0]["payload"], "", "the feed serves an empty payload for a transaction without one");
+    assert_eq!(all[5]["op"], "sweep");
+    assert!(all[5].get("payload").is_none(), "a sweep entry carries no payload: {}", all[5]);
+
+    assert_eq!(follow_history(&web, seqs[2]).await, all[3..].to_vec(), "after is exclusive");
+    let (status, _, v) = web.get_json(&format!("/v1/history?after={}", seqs[5])).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(v["entries"], json!([]), "past the newest entry the page is empty");
+    assert!(v.get("next").is_none());
+    assert_eq!(v["historyEpoch"].as_str().map(str::len), Some(32), "{v}");
+
+    h.stop().await;
+}
+
+#[tokio::test]
+async fn the_history_feed_refuses_a_bad_query_and_serves_no_payload_that_it_does_not_hold() {
+    let (h, _w, web, _) = web_boot("web_history_refusals").await;
+    let seqs: Vec<i64> = follow_history(&web, 0).await.iter().map(|e| e["historySeq"].as_i64().unwrap()).collect();
+    for bad in [
+        "limit=0",
+        "limit=1",
+        "limit=99",
+        "limit=101",
+        "limit=0100",
+        "limit=",
+        "limit=100&limit=100",
+        "limit=%2B100",
+        "limit=x",
+        "after=-1",
+        "after=01",
+        "after=%2B1",
+        "after=x",
+        "after=9223372036854775808",
+        "after=",
+        "offset=1",
+    ] {
+        let (status, _, v) = web.get_json(&format!("/v1/history?{bad}")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}: {v}");
+        assert_eq!(v["code"], "invalid_query", "{bad}");
+    }
+    let (status, _, v) = web.get_json("/v1/history?after=9223372036854775807").await;
+    assert_eq!(status, StatusCode::OK, "the highest historySeq is a valid after: {v}");
+
+    let mut conn = h.app.backends.db.acquire().await.unwrap();
+    sqlx::query("UPDATE history SET payload = NULL WHERE id = $1").bind(seqs[0]).execute(&mut *conn).await.unwrap();
+    drop(conn);
+    let (status, _, v) = web.get_json("/v1/history?limit=100").await;
+    assert_eq!(status, StatusCode::OK, "the feed accepts 100, its one limit");
+    assert_eq!(v["entries"][0]["historySeq"], seqs[0]);
+    assert!(v["entries"][0].get("payload").is_none(), "{v}");
+    h.stop().await;
+}
+
+/// A page holds 100 entries. A page that ends the feed exactly carries no `next`. Every page
+/// takes the cache TTL, the newest included.
+#[tokio::test]
+async fn a_page_of_history_holds_100_entries_and_every_page_is_cached() {
+    let (h, mut w, web, _) = web_boot("web_history_pages").await;
+    for n in 0..49 {
+        let (s, a) = w.register(&format!("n{n}"), &OWNER_A);
+        h.sim.add_block(vec![s, a]);
+    }
+    h.wait_until("49 more names", || async { h.history(&dotk_core::key_of("n48")).await.len() == 2 }).await;
+    let ttl = format!("public, max-age={}", h.app.deployment.args.cache_ttl.as_secs());
+    let (_, cache, v) = web.get_json("/v1/history").await;
+    assert_eq!(v["entries"].as_array().unwrap().len(), 100);
+    assert!(v.get("next").is_none(), "a page that ends the feed exactly has no next");
+    assert_eq!(cache, ttl, "the newest page takes the TTL too");
+
+    let (s, a) = w.register("last", &OWNER_A);
+    h.sim.add_block(vec![s, a]);
+    h.wait_until("one more name", || async { h.history(&dotk_core::key_of("last")).await.len() == 2 }).await;
+    let (_, cache, first) = web.get_json("/v1/history").await;
+    let page = first["entries"].as_array().unwrap();
+    assert_eq!(page.len(), 100);
+    assert_eq!(first["next"], page[99]["historySeq"]);
+    assert_eq!(cache, ttl);
+    let (_, cache, second) = web.get_json(&format!("/v1/history?after={}", first["next"])).await;
+    assert_eq!(second["entries"].as_array().unwrap().len(), 2, "{second}");
+    assert!(second.get("next").is_none());
+    assert_eq!(cache, ttl);
+    assert_eq!(follow_history(&web, 0).await.len(), 102, "the pages add up to the whole feed");
+    h.stop().await;
+}
+
+/// A follower boots from `/snapshot` and continues with its marker, and gets exactly what
+/// came after.
+#[tokio::test]
+async fn the_snapshot_marker_continues_the_history_feed() {
+    let (h, mut w, web, _) = web_boot("web_history_handoff").await;
+    let (_, _, snap) = web.get_json("/v1/snapshot?proven=false").await;
+    let all = follow_history(&web, 0).await;
+    assert_eq!(snap["historySeq"], all.last().unwrap()["historySeq"], "the snapshot's marker is its newest entry");
+    let (_, _, page) = web.get_json("/v1/history").await;
+    assert_eq!(snap["historyEpoch"], page["historyEpoch"], "the snapshot names the epoch of the feed that it continues");
+
+    let (s, a) = w.register("bob", &OWNER_A);
+    h.sim.add_block(vec![s, a]);
+    h.wait_until("bob", || async { h.history(&dotk_core::key_of("bob")).await.len() == 2 }).await;
+    let after = follow_history(&web, snap["historySeq"].as_i64().unwrap()).await;
+    let bob = hex_key("bob");
+    assert_eq!(after.iter().map(|e| e["key"].as_str().unwrap()).collect::<Vec<_>>(), [&bob, &bob], "exactly what came after");
+    h.stop().await;
+}
+
+#[tokio::test]
+async fn a_page_of_history_stops_at_its_payload_budget() {
+    let (h, mut w, web, _) = web_boot("web_history_budget").await;
+    for size in [1 << 19, 1 << 19, (1 << 20) + 1] {
+        let mut big = w.transfer("alice", &OWNER_A);
+        big.payload = vec![0x42; size];
+        h.sim.add_block(vec![big]);
+    }
+    h.wait_until("three transfers", || async { h.history(&dotk_core::key_of("alice")).await.len() == 5 }).await;
+    let (_, _, v) = web.get_json("/v1/history").await;
+    let page = v["entries"].as_array().unwrap();
+    assert_eq!(page.len(), 4, "two halves fill the budget exactly, and the page keeps both");
+    assert_eq!(v["next"], page[3]["historySeq"]);
+    let (_, _, second) = web.get_json(&format!("/v1/history?after={}", v["next"])).await;
+    let second = second["entries"].as_array().unwrap().clone();
+    assert_eq!(second.len(), 1, "a payload over the budget goes out alone");
+    assert_eq!(second[0]["payload"].as_str().map(str::len), Some(2 * ((1 << 20) + 1)));
+    h.stop().await;
+}
+
+/// A reader that holds a `historySeq` from a block that a reorg removes still sees the replayed
+/// entries, because they come with higher values.
+#[tokio::test]
+async fn a_reorg_replays_history_above_every_historyseq_that_a_reader_holds() {
+    let (h, mut w) = standard_boot("web_history_reorg", fast_args()).await;
+    let web = Web::new(&h);
+    let key = dotk_core::key_of("alice");
+    let (split, activate) = w.register("alice", &OWNER_A);
+    h.sim.add_block(vec![split.clone()]);
+    h.sim.add_block(vec![activate.clone()]);
+    h.wait_until("alice", || async { h.history(&key).await.len() == 2 }).await;
+    assert!(h.selftest_now().await.proven);
+    let before = follow_history(&web, 0).await;
+    let held = before.last().unwrap()["historySeq"].as_i64().unwrap();
+
+    h.sim.reorg(2, vec![vec![], vec![split], vec![activate], vec![]]);
+    h.wait_until("history rewritten onto the winning chain", || async {
+        let live: std::collections::HashSet<[u8; 32]> = h.sim.chain_hashes().into_iter().collect();
+        let history = h.history(&key).await;
+        history.len() == 2 && history.iter().all(|e| live.contains(&e.block_hash))
+    })
+    .await;
+    let live: Vec<String> = h.sim.chain_hashes().iter().map(dotk_indexer::convert::hex32).collect();
+    assert!(before.iter().all(|e| !live.contains(&e["blockHash"].as_str().unwrap().to_string())), "the held entries left the chain");
+    let replayed = follow_history(&web, held).await;
+    assert_eq!(replayed.iter().map(|e| e["op"].clone()).collect::<Vec<_>>(), vec![json!("register"), json!("activate")]);
+    assert_eq!(follow_history(&web, 0).await, replayed, "the removed entries are gone");
+    h.stop().await;
+}
+
+#[tokio::test]
+async fn the_history_feed_migration_runs_again_after_a_rollback() {
+    let pool = fresh_pool("history_feed_rerun").await;
+    dotk_indexer::db::migrate(&pool).await.unwrap();
+    let mut conn = pool.acquire().await.unwrap();
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version = 1").execute(&mut *conn).await.unwrap();
+    dotk_indexer::db::migrate(&pool).await.expect("0001 runs again over what it finds");
+}
+
+/// `rotate_history_epoch` writes a new epoch on each call, which is what every start relies on.
+#[tokio::test]
+async fn each_rotation_names_a_new_history_epoch() {
+    let pool = fresh_pool("history_epoch_rotation").await;
+    dotk_indexer::db::migrate(&pool).await.unwrap();
+    let mut conn = pool.acquire().await.unwrap();
+    let mut epochs = std::collections::HashSet::new();
+    for _ in 0..2 {
+        dotk_indexer::db::rotate_history_epoch(&mut conn).await.unwrap();
+        epochs.insert(dotk_indexer::db::get_var(&mut conn, dotk_indexer::db::VAR_HISTORY_EPOCH).await.unwrap().unwrap());
+    }
+    assert_eq!(epochs.len(), 2, "{epochs:?}");
+}
+
+/// A key's history and the feed serve one entry alike, except that only the feed carries the
+/// payload.
+#[tokio::test]
+async fn a_key_history_entry_is_the_feed_entry_without_its_payload() {
+    let (h, mut w, web, _) = web_boot("web_history_alike").await;
+    let card = w.transfer_with_card("alice", &OWNER_A, &records_named("alice"), &OWNER_A);
+    h.sim.add_block(vec![card]);
+    h.wait_until("alice's transfer", || async { h.history(&dotk_core::key_of("alice")).await.len() == 3 }).await;
+    let alice = hex_key("alice");
+    let (_, _, v) = web.get_json(&format!("/v1/keys/{alice}/history?limit=100")).await;
+    let mut by_key: Vec<serde_json::Value> = v["entries"].as_array().unwrap().clone();
+    by_key.reverse();
+    let fed: Vec<serde_json::Value> = follow_history(&web, 0).await.into_iter().filter(|e| e["key"] == alice.as_str()).collect();
+    assert_eq!(by_key.len(), 3);
+    assert_eq!(by_key.len(), fed.len());
+    for (k, mut f) in by_key.into_iter().zip(fed) {
+        assert!(k.get("payload").is_none(), "only the feed serves payloads: {k}");
+        f.as_object_mut().unwrap().remove("payload");
+        assert_eq!(k, f, "both endpoints serve the entry alike");
+    }
+    h.stop().await;
+}
+
+/// One byte past the budget is enough to end a page.
+#[tokio::test]
+async fn a_page_ends_one_byte_past_its_payload_budget() {
+    let (h, mut w, web, _) = web_boot("web_history_budget_edge").await;
+    for size in [1 << 19, (1 << 19) + 1] {
+        let mut big = w.transfer("alice", &OWNER_A);
+        big.payload = vec![0x42; size];
+        h.sim.add_block(vec![big]);
+    }
+    h.wait_until("two transfers", || async { h.history(&dotk_core::key_of("alice")).await.len() == 4 }).await;
+    let (_, _, v) = web.get_json("/v1/history").await;
+    let page = v["entries"].as_array().unwrap();
+    assert_eq!(page.len(), 3, "the second half and one byte do not fit beside the first");
+    assert_eq!(v["next"], page[2]["historySeq"]);
     h.stop().await;
 }

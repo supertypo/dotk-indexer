@@ -379,6 +379,12 @@ impl CardChangeOut {
 #[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct HistoryEntry {
+    /// This indexer's number for the entry. Within one `historyEpoch`, an entry applied later has a
+    /// higher number. The number means nothing on another indexer.
+    #[schema(minimum = 1)]
+    history_seq: i64,
+    /// The name key, `blake3(name)` in 64 hex characters.
+    key: String,
     op: HistoryOpOut,
     /// Apply order within the accepting block.
     seq: i32,
@@ -414,12 +420,21 @@ pub(super) struct HistoryEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(nullable = false)]
     card_change: Option<CardChangeOut>,
+    /// The transaction payload of `txid`, hex, empty when it has none. Only `/history` serves it,
+    /// on the entry of the transaction's own operation. A discover or a sweep entry carries none,
+    /// and neither does an entry that an indexer before 1.1.0 recorded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(nullable = false)]
+    payload: Option<String>,
 }
 
 impl HistoryEntry {
-    pub(super) fn new(row: &crate::model::HistoryRow) -> Self {
+    pub(super) fn new(stored: &db::StoredHistory, with_payload: bool) -> Self {
+        let row = &stored.row;
         let state = row.state.as_ref();
         Self {
+            history_seq: stored.id,
+            key: hex32(&row.key),
             op: row.op.into(),
             seq: row.seq,
             blue_score: row.blue_score,
@@ -433,6 +448,7 @@ impl HistoryEntry {
             owner: state.and_then(|s| s.owner.as_ref().map(hex32)),
             claim: state.and_then(|s| s.claim.as_ref().map(hex32)),
             card_change: CardChangeOut::of(row.card),
+            payload: row.payload.as_deref().filter(|_| with_payload).map(faster_hex::hex_string),
         }
     }
 }
@@ -453,6 +469,30 @@ pub(super) struct HistoryResponse {
     /// history too.
     pub(super) complete: bool,
     pub(super) entries: Vec<HistoryEntry>,
+    pub(super) registry_covenant_id: String,
+}
+
+/// The feed serves this indexer's history across every key, in apply order, one page at a time. It
+/// holds what this indexer observed, from the point where it began to observe. A reader follows it
+/// by passing the last `historySeq` that it holds as `after`. An entry that a reorg applies gets a
+/// higher `historySeq` than every earlier entry. A reorg can remove the entries of the blocks that
+/// it drops. A self-test repair changes rows and writes no entry. No page announces a removed entry
+/// or a repair. A reader that keeps state must make sure that the state holds against a node, or
+/// start again from `/snapshot`.
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct HistoryFeedResponse {
+    /// A random tag that names this run's numbering of `historySeq`. The indexer writes a new one
+    /// at every start, a start on a restored database included. Every `historySeq` of an old epoch
+    /// means nothing, so a reader that sees the epoch change must start again from `/snapshot`.
+    pub(super) history_epoch: String,
+    pub(super) entries: Vec<HistoryEntry>,
+    /// The `after` of the next page. It is absent on the last page. A page ends early, and carries
+    /// `next`, before the transaction payload that takes its raw payload bytes past 1 MiB. The
+    /// first entry of a page always stays.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(nullable = false, minimum = 1)]
+    pub(super) next: Option<i64>,
     pub(super) registry_covenant_id: String,
 }
 
@@ -803,6 +843,15 @@ pub(super) struct SpenderCardsQuery {
 pub(super) struct HistoryQuery {
     pub(super) limit: Option<u32>,
     pub(super) offset: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct HistoryFeedQuery {
+    pub(super) after: Option<String>,
+    /// `limit` is a string, so that the handler refuses `0100` and `+100` as other spellings of
+    /// 100.
+    pub(super) limit: Option<String>,
 }
 
 #[derive(Deserialize)]

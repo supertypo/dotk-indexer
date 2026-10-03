@@ -52,6 +52,7 @@ pub(crate) async fn export_rows(
     db::set_local_statement_timeout(&mut tx, statement_timeout).await?;
     let checkpoint = db::get_var(&mut tx, db::VAR_VCP_CHECKPOINT).await?.ok_or(NoCheckpoint)?;
     let history_seq: Option<i64> = sqlx::query_scalar("SELECT max(id) FROM history").fetch_one(&mut *tx).await?;
+    let history_epoch = db::get_var(&mut tx, db::VAR_HISTORY_EPOCH).await?;
     let deeds = db::all_deeds(&mut tx).await?;
     let cards = db::unswept_cards(&mut tx).await?;
     let events = resume_events(&mut tx, resume_window).await?;
@@ -62,6 +63,7 @@ pub(crate) async fn export_rows(
         registry_covenant_id: registry_covenant_id.to_string(),
         vcp_checkpoint: checkpoint,
         history_seq,
+        history_epoch,
         deeds: deeds.iter().map(ExportDeed::from).collect(),
         cards: cards.iter().map(ExportCard::from).collect(),
         events: events.iter().map(ExportEvent::from).collect(),

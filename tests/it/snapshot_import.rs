@@ -111,6 +111,7 @@ async fn nothing_from_the_tables_is_served_before_the_first_verdict() {
         "/v1/owners/0/5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
         "/v1/spenders/0/5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a/cards",
         "/v1/keyspace",
+        "/v1/history",
     ] {
         let (status, cache, body) = web.get_json(uri).await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{uri}: {body}");
@@ -378,5 +379,40 @@ async fn journal_coverage_floor_drops_once_the_pipeline_journals_its_own_blocks(
         baseline.finished_ms,
         "exact undo above the coverage floor must not escalate to a full validation"
     );
+    h.stop().await;
+}
+
+/// A snapshot that leaves out a name lets the next split discover it. The discover entry carries
+/// no payload, and the entry of the split that revealed it carries the transaction's payload.
+#[tokio::test]
+async fn a_discover_entry_leaves_the_payload_to_its_transactions_own_entry() {
+    let (mut w, genesis_tx) = World::new();
+    let sim = Arc::new(SimKaspad::new(Prefix::Testnet, vec![genesis_tx]));
+    let (s, a) = w.register("alice", &OWNER_A);
+    sim.add_block(vec![s, a]);
+    let checkpoint = sim.dag_info().await.unwrap().virtual_parent;
+    let pool = fresh_pool("discover_payload").await;
+    dotk_indexer::db::migrate(&pool).await.unwrap();
+    let (start, _) = snapshot::import(&pool, &snapshot_at(dotk_indexer::convert::hex32(&checkpoint), vec![], vec![]), &genesis_file())
+        .await
+        .unwrap();
+    let h = Harness::boot_with(pool, sim, fast_args(), start, 1, SelfTest::Driven);
+    let split = w.split("bob", &OWNER_A);
+    let split_txid = dotk_indexer::convert::hex32(&split.txid);
+    h.sim.add_block(vec![split]);
+    let alice = dotk_core::key_of("alice");
+    h.wait_until("alice discovered", || async { !h.history(&alice).await.is_empty() }).await;
+    h.selftest_now().await;
+
+    let (status, _, v) = Web::new(&h).get_json("/v1/history").await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let entries = v["entries"].as_array().unwrap();
+    let discover = entries.iter().find(|e| e["op"] == "discover").expect("a discover entry");
+    assert_eq!(discover["key"], dotk_indexer::convert::hex32(&alice).as_str());
+    assert_eq!(discover["txid"], split_txid.as_str());
+    assert!(discover.get("payload").is_none(), "a discover entry carries no payload: {discover}");
+    let own = entries.iter().find(|e| e["op"] == "register").expect("the split's own entry");
+    assert_eq!(own["txid"], split_txid.as_str());
+    assert_eq!(own["payload"], "", "the split's own entry carries its transaction's payload");
     h.stop().await;
 }

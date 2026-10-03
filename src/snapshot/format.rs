@@ -36,6 +36,11 @@ pub struct Snapshot {
     #[serde(default)]
     #[schema(required = true)]
     pub history_seq: Option<i64>,
+    /// The `historyEpoch` of `/history`, from the same transaction as `historySeq`. It is outside
+    /// the canonical core, and an importer ignores it.
+    #[serde(default)]
+    #[schema(required = true)]
+    pub history_epoch: Option<String>,
     pub deeds: Vec<ExportDeed>,
     /// Unswept cards only. Cards are outside the canonical core, and the self-test proves
     /// nothing about them.

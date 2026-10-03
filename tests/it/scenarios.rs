@@ -395,3 +395,30 @@ async fn a_lagging_node_does_not_stop_the_pipeline() {
     .await;
     h.stop().await;
 }
+
+/// A production upgrade: 0001 runs over a database that 1.0.0 filled. The old rows keep their
+/// place in the feed with no payload, and the database gains an epoch.
+#[tokio::test]
+async fn the_history_feed_migration_upgrades_a_database_that_1_0_0_filled() {
+    let pool = fresh_pool("history_feed_upgrade").await;
+    let mut first = sqlx::migrate!("./migrations");
+    first.migrations = std::borrow::Cow::Owned(first.migrations.iter().filter(|m| m.version == 0).cloned().collect());
+    first.run(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO history (key, op, card, seq, blue_score, daa_score, block_time, block_hash, txid) \
+         VALUES ($1, 1, 0, 0, 1, 1, 1, $2, $3)",
+    )
+    .bind(&[1u8; 32][..])
+    .bind(&[2u8; 32][..])
+    .bind(&[3u8; 32][..])
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    dotk_indexer::db::migrate(&pool).await.unwrap();
+    let mut conn = pool.acquire().await.unwrap();
+    let page = dotk_indexer::db::history_feed(&mut conn, 0, 100, 1 << 20).await.unwrap();
+    assert_eq!(page.rows.len(), 1, "the 1.0.0 row stays in the feed");
+    assert_eq!(page.rows[0].row.payload, None, "an old row has no payload");
+    assert!(!page.epoch.is_empty(), "the upgrade writes an epoch");
+}

@@ -33,6 +33,9 @@ pub async fn run(args: CliArgs, genesis: GenesisFile, genesis_raw: Bytes) -> Res
     let ident = identity::of(&genesis, &derived.watch).context("deployment manifest")?;
     let boot = Boot { args: &args, genesis: &genesis, kaspad: kaspad.as_ref(), pool: &pool, ident: &ident, net_bps: derived.net_bps };
     let start = bootstrap(&boot).await?;
+    let mut conn = pool.acquire().await.context("acquiring a postgres connection")?;
+    db::rotate_history_epoch(&mut conn).await.context("writing a new history epoch")?;
+    drop(conn);
 
     let app = Arc::new(App::with(args, pool, kaspad, genesis, genesis_raw, derived, start.coverage_floor));
     let _ = signals.send(app.clone());

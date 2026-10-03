@@ -17,14 +17,14 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use utoipa::OpenApi;
 
 use super::dto::{
-    CardChangeOut, CardOut, DeedOut, GapOut, GapsByWidth, HealthResponse, HistoryEntry, HistoryOpOut, HistoryResponse, KeyKindOut,
-    KeyResponse, KeysByPrefix, KeyspaceResponse, KeyspaceTotals, Manifest, NameResponse, NeighborGaps, NoQuery, OwnerResponse,
-    RecordValueOut, RowKindOut, SelfTestDetail, SelfTestSummary, SpenderCardsResponse, StatusOut,
+    CardChangeOut, CardOut, DeedOut, GapOut, GapsByWidth, HealthResponse, HistoryEntry, HistoryFeedResponse, HistoryOpOut,
+    HistoryResponse, KeyKindOut, KeyResponse, KeysByPrefix, KeyspaceResponse, KeyspaceTotals, Manifest, NameResponse, NeighborGaps,
+    NoQuery, OwnerResponse, RecordValueOut, RowKindOut, SelfTestDetail, SelfTestSummary, SpenderCardsResponse, StatusOut,
 };
 use super::error::{ErrorCode, ErrorResponse};
 use super::handlers::{
-    self, get_address, get_genesis, get_health, get_key, get_key_by_name, get_key_history, get_keyspace, get_name, get_owner,
-    get_snapshot, get_spender_cards,
+    self, get_address, get_genesis, get_health, get_history, get_key, get_key_by_name, get_key_history, get_keyspace, get_name,
+    get_owner, get_snapshot, get_spender_cards,
 };
 use super::middleware::{cache_control_default_mw, cache_control_mw, cors_layer, request_timeout_mw, tagged_json};
 use super::pages::{DOCS_CSP, DOCS_PAGE, font_routes, fonts_path, html, logo, logo_path, script_path, status_page, status_script};
@@ -64,6 +64,7 @@ pub(super) const HEALTH_TAG: &str = "health";
         handlers::get_key,
         handlers::get_key_by_name,
         handlers::get_key_history,
+        handlers::get_history,
         handlers::get_keyspace,
         handlers::get_snapshot,
         handlers::get_genesis,
@@ -79,6 +80,7 @@ pub(super) const HEALTH_TAG: &str = "health";
         RecordValueOut,
         KeyResponse,
         HistoryResponse,
+        HistoryFeedResponse,
         HistoryEntry,
         KeyspaceResponse,
         KeyspaceTotals,
@@ -143,6 +145,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route(&format!("{api}/names/{{name}}/key"), get(get_key_by_name))
         .route(&format!("{api}/keys/{{key}}"), get(get_key))
         .route(&format!("{api}/keys/{{key}}/history"), get(get_key_history))
+        .route(&format!("{api}/history"), get(get_history))
         .route(&format!("{api}/keyspace"), get(get_keyspace))
         .route(&format!("{api}/owners/{{owner_type}}/{{owner}}"), get(get_owner))
         .route(&format!("{api}/addresses/{{address}}"), get(get_address))

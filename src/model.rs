@@ -204,6 +204,9 @@ pub struct HistoryRow {
     pub txid: [u8; 32],
     pub state: Option<DeedRow>,
     pub card: CardChange,
+    /// The transaction payload, on the row of the transaction's own operation only. A discover
+    /// row, a sweep row and a row that a build before 1.1.0 wrote hold `None`.
+    pub payload: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

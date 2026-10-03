@@ -513,7 +513,7 @@ impl Harness {
     /// Oldest first, the reverse of the API order.
     pub(crate) async fn history(&self, key: &[u8; 32]) -> Vec<dotk_indexer::model::HistoryRow> {
         let mut conn = self.app.backends.db.acquire().await.unwrap();
-        let mut rows = db::history_page(&mut conn, key, 1000, 0).await.unwrap();
+        let mut rows: Vec<_> = db::history_page(&mut conn, key, 1000, 0).await.unwrap().into_iter().map(|s| s.row).collect();
         rows.reverse();
         rows
     }
@@ -655,6 +655,7 @@ pub(crate) fn snapshot_at(
         registry_covenant_id: REGISTRY_COVENANT_ID.into(),
         vcp_checkpoint: checkpoint,
         history_seq: None,
+        history_epoch: None,
         deeds,
         cards: vec![],
         events,

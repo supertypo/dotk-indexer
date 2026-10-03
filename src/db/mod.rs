@@ -20,13 +20,15 @@ pub use gaps::{
     GAP_WIDTH_BUCKETS_PER_AVERAGE, all_gaps, delete_gap, delete_gap_if_matches, get_gap, keyspace_summary, upsert_gap,
     upsert_gap_if_matches,
 };
-pub use history::{append_history, delete_history_for_block, history_page, history_page_with_extent};
+pub use history::{
+    FeedPage, StoredHistory, append_history, delete_history_for_block, history_feed, history_page, history_page_with_extent,
+};
 pub use journal::{
     EventRow, append_event, delete_events_for_block, delete_imported_events_for_block, discovered_inside_since, event_exists,
     events_for_block_desc, events_for_resume, gaps_touched_since, journal_coverage, keys_touched_since, mine_candidates,
     prune_events_below,
 };
-pub use vars::{VAR_VCP_CHECKPOINT, get_var, get_var_for_update, has_checkpoint, set_var};
+pub use vars::{VAR_HISTORY_EPOCH, VAR_VCP_CHECKPOINT, get_var, get_var_for_update, has_checkpoint, rotate_history_epoch, set_var};
 
 use std::time::Duration;
 
