@@ -7,7 +7,7 @@ FROM rust:${RUST_VERSION}-alpine AS builder
 ARG RUST_VERSION
 ARG REPO_DIR=.
 
-RUN apk --no-cache add musl-dev g++ linux-headers make perl git
+RUN apk --no-cache add musl-dev gcc git
 
 WORKDIR /work
 
