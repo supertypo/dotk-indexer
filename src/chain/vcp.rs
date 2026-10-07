@@ -13,7 +13,8 @@ use crate::chain::{ChainBlock, VccResponse};
 use crate::convert::hex32;
 use crate::db;
 
-const CATCHUP_THRESHOLD: usize = 200;
+/// A node can cut an answer at the mergeset size limit of merged blocks, about 30 chain blocks on mainnet.
+const CATCHUP_THRESHOLD: usize = 20;
 
 /// With `ERR_DELAY` between tries, this rides out about five minutes of database outage.
 const PROCESS_FAILURE_LIMIT: u32 = 60;
